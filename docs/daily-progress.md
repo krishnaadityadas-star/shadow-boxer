@@ -277,3 +277,61 @@ The next major milestone is integrating both components into one working applica
 **Project:** Shadow-Boxer  
 **Development Day:** 4  
 **Date:** 8 November 2026
+
+# Day 5 — 9 November 2026
+## Gesture Integration and MVP Completion
+
+### Work Completed
+
+**Krishna — OpenCV and Gesture Integration**
+- Integrated the reusable `GestureDetector` module with the Pygame game.
+- Replaced the incompatible legacy MediaPipe API with the Tasks API.
+- Connected all four gestures to game actions: left, right, jump and duck.
+- Added C-key standing-position calibration.
+- Integrated webcam preview and live gesture-status feedback.
+- Used a separate worker thread for webcam processing.
+- Preserved keyboard controls alongside gesture controls.
+- Improved game typography and introduction-screen instructions.
+
+**Tushar — MediaPipe Research**
+- Continued exploring MediaPipe pose landmarks and detection.
+- Supported understanding of pose detection and gesture-recognition requirements.
+
+**Onkar — Pygame Development**
+- Developed the main game, including mechanics, graphics and player movement.
+- Provided the game files for integration.
+- Maintained existing keyboard controls and game functionality.
+
+### Milestones Achieved
+
+1. Integrated gesture detection with Pygame using the MediaPipe Tasks API.
+2. Connected all four body gestures to in-game actions.
+3. Implemented calibration and webcam status feedback.
+4. Preserved keyboard controls alongside gesture controls.
+5. Completed end-to-end integration and achieved a functional MVP.
+
+### Challenges Resolved
+
+- **MediaPipe compatibility:** Migrated from the unavailable legacy Solutions API to the Tasks API.
+- **Pygame dependency:** Installed Pygame in the correct virtual environment.
+- **Font formatting:** Improved font handling and readability.
+- **Webcam integration:** Used a separate worker thread to maintain game stability.
+
+### Testing and Validation
+
+- Successfully launched the integrated game and activated the webcam.
+- Verified calibration and all four gesture-based actions.
+- Confirmed keyboard controls work alongside gestures.
+- Confirmed stable operation without crashes or freezes during testing.
+
+### Next Sprint Objectives
+
+1. Implement gesture-based Punch (Q) and Block (E).
+2. Improve game graphics and animations.
+3. Refine gesture responsiveness and accuracy.
+4. Test different screen resolutions and devices.
+5. Optimize the MVP and prepare for final demonstration.
+
+### Overall Status
+
+**Functional MVP Achieved.** The OpenCV, MediaPipe and Pygame components are successfully integrated. All four gestures work alongside keyboard controls, and the application has passed initial end-to-end testing.
