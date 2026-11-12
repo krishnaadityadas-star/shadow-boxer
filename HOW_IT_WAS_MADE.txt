@@ -1,0 +1,420 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              SHADOW-BOXER  –  HOW THE GAME WAS MADE                         ║
+║              A plain-English walkthrough of game.py                          ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+─────────────────────────────────────────────────────────────────────────────
+  OVERVIEW
+─────────────────────────────────────────────────────────────────────────────
+Shadow-Boxer is a 2-D fighting game written in Python using the Pygame library.
+It runs in a resizable window (or full-screen on mobile) and targets 60 frames
+per second. All graphics are drawn with Pygame's own drawing functions — there
+are NO sprites, spritesheets, or image files. Every shape you see (fighters,
+arena, sky, particles) is generated in code each frame.
+
+The game also supports an OPTIONAL webcam input: if you have OpenCV and
+MediaPipe installed, you can control the player with real body movements
+captured by your webcam.
+
+─────────────────────────────────────────────────────────────────────────────
+  FILE STRUCTURE
+─────────────────────────────────────────────────────────────────────────────
+  game.py      – The entire game (1141 lines, single file)
+  run.sh       – Shell script to activate the venv and launch game.py
+  .venv/       – Python virtual environment with Pygame, OpenCV, MediaPipe, etc.
+
+─────────────────────────────────────────────────────────────────────────────
+  LIBRARIES USED
+─────────────────────────────────────────────────────────────────────────────
+  pygame       – Window, drawing, keyboard/mouse/touch events, timing
+  cv2          – (optional) OpenCV for reading webcam frames
+  mediapipe    – (optional) Google's pose-estimation AI (body landmark tracking)
+  numpy        – (optional) Used to convert webcam frames for Pygame display
+  threading    – The webcam runs on a background thread so it never slows down
+                 the main game loop
+  math, random, collections, sys, time – standard Python library
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 1 – COLOUR PALETTE  (lines 37–53)
+─────────────────────────────────────────────────────────────────────────────
+All colours are defined once at the top as named tuples:
+  • C_BG / C_SHADOW  – deep dark background / near-black silhouette fill
+  • P_GLOW / P_GLOW2 / P_CORE  – player glow (blue tones, "Herald" faction)
+  • B_GLOW / B_GLOW2 / B_CORE  – bot glow (red/orange tones, "Legion" faction)
+  • GOLD, WHITE, GREY, GREEN, RED_HIT, PURPLE – general UI colours
+
+Using named colours everywhere means you can retheme the whole game by
+changing just these few lines.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 2 – FONTS  (lines 56–73)
+─────────────────────────────────────────────────────────────────────────────
+The helper function _font() tries a list of system fonts in order
+(Impact → Bahnschrift → Arial Black → Arial) and falls back to Pygame's
+built-in font if none are found.  Five pre-sized font objects are created
+(Fxs=13pt, Fsm=18pt, Fmd=26pt, Flg=44pt, Fxl=72pt, Fhud=20pt).
+
+The txt() function renders any string with an optional black drop-shadow
+offset by 2 pixels — a classic trick to make text readable on any background.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 3 – GLOW / BLOOM EFFECTS  (lines 75–91)
+─────────────────────────────────────────────────────────────────────────────
+Real-time bloom is simulated with two helpers:
+
+  glow_circ(surf, col, centre, radius, strength)
+    Draws concentric filled circles with decreasing alpha from centre outward.
+    Results are cached in a dictionary (_gcache) keyed by (colour, radius) so
+    the expensive surface creation only happens once per unique glow size.
+    The surface is blended with BLEND_RGBA_ADD (additive blend) so overlapping
+    glows brighten rather than replace each other — exactly like real light.
+
+  glow_line(surf, col, p1, p2, width, glow_radius, strength)
+    Draws a wide semi-transparent halo around a line, then the sharp line on
+    top.  Used for arm traces, leg outlines, etc.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 4 – SCREEN SHAKE  (lines 93–101)
+─────────────────────────────────────────────────────────────────────────────
+The Shake class stores a timer (t) and magnitude (m).
+  trigger(magnitude, duration)  – called whenever a hit lands
+  off()  – called each frame; returns a random (dx, dy) offset that shrinks
+           as the timer counts down.
+
+The main loop then blits the entire rendered frame offset by that amount,
+creating the screen-shake effect without touching any game logic.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 5 – FLOATING DAMAGE NUMBERS  (lines 103–114)
+─────────────────────────────────────────────────────────────────────────────
+DmgNumber stores a position, a value, a lifetime (55 frames), and a "crit" flag.
+Each frame it moves upward (y -= 1.4) and fades out (alpha = life/55).
+Critical hits (damage ≥ 18) use a larger font and show a "💥N!" label.
+The list of active numbers is filtered each frame — only live ones survive.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 6 – PARTICLES  (lines 116–191)
+─────────────────────────────────────────────────────────────────────────────
+Four particle types, all managed by the Particles container class:
+
+  Particle   – Burst particle emitted on hit or landing.
+               Has position, velocity (vx/vy), lifetime, colour, size.
+               Gravity is applied each frame (vy += 0.26) and horizontal drag
+               (vx *= 0.96).  Drawn as a circle that shrinks and colour-shifts
+               toward white as it fades.
+
+  Trail      – Short-lived line trace of past fist positions.
+               Stored as a list of (x,y) points; drawn as glowing line segments.
+               Lasts only 14 frames to give a motion-blur feel.
+
+  Ember      – Atmospheric slow-drifting particle (like floating embers).
+               Drifts upward with a sinusoidal side-wobble; lives 180–350 frames.
+
+  DmgNumber  – (described above)
+
+Shockwaves (_shockwaves list, draw_sw()) are expanding circles emitted when
+a punch lands. Each stores [cx, cy, colour, current_radius, max_radius].
+Every frame the radius grows by 8 pixels and alpha fades out; the wave dies
+when it reaches max_radius.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 7 – WEBCAM POSE TRACKER  (lines 193–230)
+─────────────────────────────────────────────────────────────────────────────
+PoseTracker runs entirely on a daemon background thread so webcam processing
+never blocks the game's 60 fps loop.
+
+The thread opens the webcam with OpenCV, flips the frame horizontally
+(mirror view), and feeds each RGB frame to MediaPipe's Pose model.
+
+The _interp() method reads 33 body landmarks and converts them to game actions:
+  • Right wrist (landmark 16) above right shoulder (12) → "PUNCH"
+  • Left wrist  (landmark 15) above left shoulder  (11) → "BLOCK"
+  • Torso lean (shoulder midpoint vs. hip midpoint X offset) → "LEFT"/"RIGHT"
+  • Both knees (25, 26) above hip midpoint Y → "JUMP"
+  • Nose (0) dropped near shoulder level → "DUCK"
+
+A threading.Lock protects shared state (actions + frame) so the main thread
+and webcam thread never race each other.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 8 – THE FIGHTER CLASS  (lines 232–716)
+─────────────────────────────────────────────────────────────────────────────
+This is the heart of the game. Each fighter (player and bot) is an instance
+of Fighter.
+
+  State Machine
+  ─────────────
+  A fighter is always in one of these states:
+    IDLE, WALK, JUMP, DUCK, PUNCH, SWEEP, BLOCK, HIT, KO
+
+  State changes follow a strict priority order inside update():
+    1. If in HIT stun – ignore all input until hit_timer reaches 0
+    2. DUCK (crouch) – highest movement priority while on ground
+       • PUNCH while crouching → SWEEP KICK (hits low, bypasses blocks)
+    3. Release crouch → IDLE
+    4. JUMP (only from ground, only while not in another action)
+    5. PUNCH (standing or in air)
+    6. BLOCK
+    7. LEFT / RIGHT movement
+    8. Auto-resets: punch/sweep/block/walk/jump return to IDLE when done
+
+  Physics
+  ───────
+  Y-axis is inverted (y=0 is the floor; negative y is above the floor).
+  Jump: sets vy = -jump_v (a negative value = upward)
+  Gravity: each frame adds gravity to vy, then adds vy to y.
+  When y >= 0 it is clamped to 0 (floor) and vy reset to 0.
+  dt (delta-time) is multiplied into all movement so the game runs at the
+  same logical speed regardless of frame rate.
+
+  Hit Detection
+  ─────────────
+  _try_hit() is called the moment a punch or sweep begins:
+    1. Distance check: is the opponent within reach?
+       (reach = fighter_width × 1.6 for punch, × 1.8 for sweep)
+    2. Height check: does the punch_height fall within the opponent's
+       hitbox band (hbox_top to hbox_bot)?
+       • Crouching fighters have a low hitbox, so standing punches miss them.
+       • Sweep kicks fire at a low height, so they hit crouching opponents
+         but NOT standing/blocking ones (unless the block is bypassed).
+    3. If both checks pass, calculate damage (5–13 for sweep, 8–20 for punch).
+    4. SHADOW MODE bonus: if shadow_energy ≥ 50, damage × 1.6 and energy resets.
+    5. Call opponent.receive_hit() with the damage and low=is_sweep flag.
+
+  receive_hit() checks if the opponent is blocking (and not a low hit).
+  If blocking, damage is reduced to max(1, dmg//5).
+  Critical hits (dmg ≥ 18) trigger stronger screen shake and shockwaves.
+  If health reaches 0, state is set to KO.
+
+  Drawing the Fighter (lines 435–716)
+  ─────────────────────────────────────
+  Everything is drawn using primitive shapes. The draw order is:
+    1. Ambient aura – pulsing glow halo around the fighter
+    2. Floor dynamic light – coloured ellipse lighting up the ground beneath
+    3. Ground shadow – dark semi-transparent ellipse under feet
+    4. Floor reflection – mirror ghost image fading below the floor line
+    5. KO pose – flattened body on the ground (early return if KO)
+    6. Legs – thigh + shin line segments with knee-cap circles and boot ellipses
+       Walk animation: sine wave swings the shin endpoints left/right over time
+       Crouch/sweep: legs bent outward in a wide stance
+    7. Belt – thin rect across the waist for detail
+    8. Torso – rounded rectangle, tilted slightly when hit
+    9. Head – circle (skull) + ellipse (jaw) + polygon (helmet ridge) +
+              glowing visor slit + ear ellipse
+   10. Shadow energy bar – tiny bar beneath feet showing energy level
+   11. Back arm – the arm behind the torso (always in rest position)
+   12. Front arm – two-segment arm (upper arm + forearm) with elbow joint;
+       position shifts dramatically for PUNCH, SWEEP, and BLOCK states
+   13. Sweep kick foot – extra extending leg drawn for sweep move
+   14. Block shield – glowing energy dome when blocking
+   15. Hit tint – red overlay flashed during stun
+   16. Walk sparks – random glowing dots near feet while walking
+   17. Crouch aura – wider glowing ellipse at ground level while crouching
+
+  Fist Trail
+  ──────────
+  Every frame the fist position is recorded in a 8-entry deque (_fist_hist).
+  While punching/sweeping, a Trail is added connecting those past positions
+  giving a motion-blur glow streak through the air.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 9 – BOT AI  (lines 722–757)
+─────────────────────────────────────────────────────────────────────────────
+BotAI uses a simple state machine with 5 states:
+  approach  – move toward the player
+  attack    – punch periodically and occasionally jump
+  sweep     – crouch + punch (triggered when player is crouching)
+  evade     – retreat when health is critically low (<22%)
+  defend    – block incoming punches and counter-punch occasionally
+
+State transitions run on a reaction timer (every 9 frames) so the bot
+doesn't respond instantly — it feels human-ish.
+
+The bot reads the player's current state to decide:
+  • Player punching → 42% chance to block
+  • Player crouching → 30% chance to sweep
+  • Health < 22% → always evade
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 10 – BACKGROUND  (lines 762–883)
+─────────────────────────────────────────────────────────────────────────────
+_build_bg() creates a static background surface once and caches it.
+It is rebuilt only if the window size changes.
+
+The background contains (from back to front):
+  • Sky gradient – drawn line by line from dark purple-black at top
+                   to slightly lighter near horizon
+  • City silhouette – procedural polygon of buildings (seeded random so
+                      buildings are always the same layout)
+  • Windows – 140 small coloured rectangles scattered across buildings
+  • Moon – two overlapping circles + 5 craters + a soft glow halo
+  • Aurora beams – 3 sinusoidal vertical light columns
+  • Stars – 240 tiny dots of varying brightness
+
+draw_bg() draws the cached background and then adds animated elements:
+  • Animated fog – 6 large semi-transparent ellipses that scroll
+                   horizontally (alternating directions) and bob up/down
+  • Crowd – 65 animated silhouette heads along the arena edge,
+            each bobbing at a slightly different phase
+
+draw_arena() draws the boxing ring:
+  • Dark canvas rectangle with grid lines
+  • 3 ropes (two red, one grey) with additive glow overlays
+  • Corner posts with glow circles
+  • A glowing floor line strip (3 layers: wide soft purple, medium,
+    sharp gold line) and a reflective floor sheen below it
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 11 – HUD (Heads-Up Display)  (lines 888–946)
+─────────────────────────────────────────────────────────────────────────────
+draw_hud() draws a semi-transparent panel at the top of the screen:
+  • Player health bar (left) and bot health bar (right) via _hbar()
+    – Bar colour shifts: blue/red → gold (25–50%) → red (<25%)
+    – A subtle shine stripe on the filled part
+    – A glowing edge at the fill end
+  • Shadow energy bars below each health bar via _sebar()
+  • Round timer (centre) in red when <10 seconds
+  • Round number and "VS" text (centre)
+  • Game title "SHADOW-BOXER" in gold at top centre
+  • Combo counter (bottom-left) in animated gold when player combo > 1
+  • "SHADOW MODE READY" notice when energy ≥ 50
+  • Crouching indicator
+  • Webcam status dot (green if active, grey otherwise)
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 12 – SCREENS  (lines 950–996)
+─────────────────────────────────────────────────────────────────────────────
+  draw_intro()  – Title screen with pulsing glow on the logo, blinking
+                  "PRESS ENTER" prompt, control hints, and webcam status.
+                  A vignette (radial dark overlay) adds atmosphere.
+
+  draw_ko()     – Semi-transparent dark overlay, pulsing "K · O" text
+                  in red, the winner's name in gold, and restart hint.
+
+  draw_webcam() – Small webcam preview in the bottom-right corner with
+                  a blue border. Uses NumPy to transpose the OpenCV
+                  array (which is H×W) into Pygame's expected W×H format.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 13 – LAYOUT & ON-SCREEN BUTTONS  (lines 1000–1029)
+─────────────────────────────────────────────────────────────────────────────
+get_layout() computes all sizing from the window dimensions:
+  ground = 78% of screen height
+  fighter height (fh) = 27% of screen height
+  fighter width (fw) = 52% of fh (tall and thin silhouette)
+  speed = 0.5% of screen width per frame × dt
+  jump_v = -2.8% of screen height (negative = upward)
+  gravity = 0.13% of screen height per frame²
+
+This means the game automatically scales to any window size.
+
+get_btns() / draw_btns() – Six virtual buttons (LEFT, RIGHT, JUMP, DUCK,
+PUNCH, BLOCK) positioned at the bottom corners of the screen for touch /
+mouse input. Shown by default on mobile, toggleable with F3 on desktop.
+
+─────────────────────────────────────────────────────────────────────────────
+  SECTION 14 – MAIN LOOP  (lines 1031–1141)
+─────────────────────────────────────────────────────────────────────────────
+The main loop runs at up to 60 fps.
+
+  dt (delta time)
+  ───────────────
+  dt = clock.tick(60) / 16.67 (clamped to 2.5)
+  At 60 fps, dt ≈ 1.0.  At lower frame rates dt > 1 so movement speeds
+  scale up to stay consistent.  Clamped at 2.5 to avoid huge jumps if
+  the game freezes briefly.
+
+  Input Merging
+  ─────────────
+  Three input sources are merged into a single set "pa" (player actions):
+    kbd    – keyboard state (set of action strings)
+    touch  – active touch/finger events
+    mouse_btn – single on-screen button held by mouse
+    pose_tracker.get_actions() – webcam body pose (if active)
+  pa = kbd | touch | {mouse_btn if set} | webcam actions
+
+  Game State Machine
+  ──────────────────
+  gstate can be one of: INTRO, PLAY, KO
+
+  INTRO: Show intro screen. Any key / touch / mouse → PLAY
+  PLAY:
+    - Decrement round timer
+    - Update player with merged input (pa)
+    - Ask BotAI for bot actions (ba), update bot
+    - Spawn atmospheric embers every 12 frames
+    - Check KO conditions: health ≤ 0 or timer expires → KO
+  KO: Show KO screen. ENTER → new round, ESC → quit
+
+  Render Pipeline (each frame)
+  ─────────────────────────────
+  Everything is drawn to an off-screen surface (render) first:
+    1. draw_bg()      – sky, city, moon, stars, fog, crowd
+    2. draw_arena()   – ring canvas, ropes, posts, glowing floor
+    3. draw_sw()      – expanding shockwave rings
+    4. Fighters (depth-sorted: whichever is further left draws first)
+    5. parts.update_draw() – all particles, trails, damage numbers, embers
+    6. draw_hud()     – health bars, timer, combo
+    7. draw_ko() (if KO state)
+    8. draw_btns() (if on-screen buttons enabled)
+    9. draw_webcam() (if webcam overlay enabled)
+
+  Then the render surface is blitted to the real screen offset by the
+  screen-shake amount, and pygame.display.flip() presents the frame.
+
+─────────────────────────────────────────────────────────────────────────────
+  SUMMARY OF KEY TECHNIQUES
+─────────────────────────────────────────────────────────────────────────────
+  Technique                 Where used
+  ─────────────────────────────────────────────────────────────────────
+  Procedural art            All characters and backgrounds drawn with
+                            primitives — no image files required
+  Additive blending         BLEND_RGBA_ADD for glows so lights stack
+                            realistically
+  Surface caching           Background and glow circles cached to avoid
+                            redrawing expensive surfaces every frame
+  Delta-time physics        All movement and gravity scaled by dt so the
+                            game is frame-rate independent
+  Off-screen rendering      Everything drawn to "render" surface first,
+                            then blitted with screen-shake offset
+  State machine             Both fighter logic and game flow use clean
+                            state machines for easy reasoning
+  Background threading      Webcam + MediaPipe run on a daemon thread;
+                            a Lock protects shared data
+  Single-file design        Entire game in one 1141-line file — easy to
+                            share and run anywhere with just Pygame
+
+─────────────────────────────────────────────────────────────────────────────
+  HOW TO RUN
+─────────────────────────────────────────────────────────────────────────────
+  cd /home/astra/Documents/Shadow-Boxer
+  bash run.sh
+
+  Or manually:
+  source .venv/bin/activate
+  python game.py
+
+─────────────────────────────────────────────────────────────────────────────
+  CONTROLS QUICK REFERENCE
+─────────────────────────────────────────────────────────────────────────────
+  A / D or ←/→     Move left / right
+  W or Space        Jump
+  S or ↓            Crouch
+  Q                 Punch
+  Q while crouching Sweep kick (hits low, bypasses blocks!)
+  E                 Block
+  F2                Toggle webcam overlay
+  F3                Toggle on-screen buttons
+  ESC               Quit
+
+  Webcam (if installed):
+    Right wrist above shoulder → PUNCH
+    Left  wrist above shoulder → BLOCK
+    Lean torso left / right    → MOVE
+    Both knees above hips      → JUMP
+    Shoulders dropped low      → CROUCH
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  That's the whole game!  Every visual, mechanic, and system described above ║
+║  lives inside the single file: game.py                                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
