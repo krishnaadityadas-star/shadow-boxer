@@ -1,0 +1,10 @@
+Shadow-Boxer regression tests
+Actual webcam CSV, all 808 frames: PASS Counter({'FORWARD': 2})
+10 seconds of steady guard: PASS Counter()
+Guard then lift/hip lowering: PASS Counter()
+Punch without previous chest guard: PASS Counter()
+Forward punch without MediaPipe world coordinates: PASS Counter({'FORWARD': 2})
+Forward punches with foreshortened 2D arm: PASS Counter({'FORWARD': 2})
+One-frame wrist occlusions: PASS Counter({'FORWARD': 2})
+Chest guard followed by real sideways extension: PASS Counter({'SIDEWAYS': 1})
+Game event preserved during hit stun; no duplicates: PASS
