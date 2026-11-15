@@ -8,8 +8,8 @@ Keyboard:
   ESC – Quit   F2 – webcam      F3 – on-screen buttons
 
 Webcam (MediaPipe Pose):
-  Right wrist above shoulder → PUNCH
-  Left wrist above shoulder  → BLOCK
+  Right arm extended outward → PUNCH (one action per extension)
+  Left hand held near head    → BLOCK (hold to defend)
   Lean torso left/right      → MOVE
   Both knees above hips      → JUMP
   Shoulders dropped low      → CROUCH 
@@ -72,6 +72,7 @@ Fmd  = _font(26, bold=True)
 Flg  = _font(44, bold=True)
 Fxl  = _font(72, bold=True)
 Fhud = _font(20, bold=True)
+Fgesture = _font(24, bold=True)
 
 
 def txt(surf, s, x, y, col=WHITE, f=Fmd, anchor="topleft", shd=True):
@@ -211,6 +212,11 @@ class PoseTracker:
         self._lock = threading.Lock()
         self._thread = None
         self._calibration_requested = threading.Event()
+        # Preserve pulse events until the Pygame loop reads them.
+        self._pending_punch = False
+        self._pending_punch_since = 0.0
+        self._last_punch_seen = 0.0
+        self._punch_count = 0
 
     def start(self):
         if not WEBCAM_AVAILABLE:
@@ -234,9 +240,18 @@ class PoseTracker:
     def request_calibration(self):
         self._calibration_requested.set()
 
-    def get_actions(self):
+    def get_actions(self, accept_punch=True):
         with self._lock:
-            return set(self.actions)
+            actions = set(self.actions)
+            # A punch is an event, not a held pose. Buffer briefly if the
+            # fighter is momentarily stunned or already mid-punch.
+            actions.discard("PUNCH")
+            if self._pending_punch and (time.monotonic() - self._pending_punch_since) > 0.85:
+                self._pending_punch = False
+            if self._pending_punch and accept_punch:
+                actions.add("PUNCH")
+                self._pending_punch = False
+            return actions
 
     def get_frame(self):
         with self._lock:
@@ -244,6 +259,8 @@ class PoseTracker:
 
     def get_status(self):
         with self._lock:
+            if time.monotonic() - self._last_punch_seen < 0.65:
+                return f"PUNCH DETECTED #{self._punch_count}", self.calibrated
             return self.status, self.calibrated
 
     def _run(self):
@@ -258,7 +275,7 @@ class PoseTracker:
                 self.status = detector.status
 
             while self.running:
-                gesture = detector.update()
+                actions = detector.update_actions()
 
                 if self._calibration_requested.is_set():
                     self._calibration_requested.clear()
@@ -267,13 +284,13 @@ class PoseTracker:
                 frame = detector.last_frame
                 calibrated = detector.is_calibrated
 
-                actions = set()
-
-                if gesture in ("LEFT", "RIGHT", "JUMP", "DUCK"):
-                    actions.add(gesture)
-
                 with self._lock:
                     self.actions = actions
+                    if "PUNCH" in actions:
+                        self._pending_punch = True
+                        self._pending_punch_since = time.monotonic()
+                        self._last_punch_seen = self._pending_punch_since
+                        self._punch_count += 1
                     self.frame = frame.copy() if frame is not None else None
                     self.status = detector.status
                     self.calibrated = calibrated
@@ -282,6 +299,7 @@ class PoseTracker:
             with self._lock:
                 self.status = f"WEBCAM ERROR: {error}"
                 self.actions = set()
+                self._pending_punch = False
 
         finally:
             if detector is not None:
@@ -289,23 +307,8 @@ class PoseTracker:
 
             with self._lock:
                 self.actions = set()
+                self._pending_punch = False
                 self.frame = None
-    def _interp(self,lm):
-        y=lambda i:lm[i].y; x=lambda i:lm[i].x; v=lambda i:lm[i].visibility
-        smy=(y(11)+y(12))/2; smx=(x(11)+x(12))/2
-        hmy=(y(23)+y(24))/2; hmx=(x(23)+x(24))/2
-        th=abs(hmy-smy) or .001; acts=set()
-        if v(16)>.4 and y(16)<y(12)-th*.15: acts.add("PUNCH")
-        if v(15)>.4 and y(15)<y(11)-th*.15: acts.add("BLOCK")
-        lean=smx-hmx
-        if lean<-.06: acts.add("LEFT")
-        elif lean>.06: acts.add("RIGHT")
-        if v(25)>.4 and v(26)>.4 and y(25)<hmy and y(26)<hmy: acts.add("JUMP")
-        if v(0)>.4 and y(0)>smy-th*.3: acts.add("DUCK")
-        return acts
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  FIGHTER
 # ═══════════════════════════════════════════════════════════════════════════
 class Fighter:
     IDLE="idle";WALK="walk";JUMP="jump";DUCK="duck"
@@ -1051,7 +1054,7 @@ def draw_intro(surf,w,h,t):
         txt(surf,"◉  WEBCAM GESTURES ENABLED",
             w//2,int(h*.56),GREEN,Fsm,"center")
 
-        txt(surf,"LEAN = MOVE   BOTH HANDS UP = JUMP   CROUCH = DUCK",
+        txt(surf,"LEAN = MOVE   BOTH HANDS UP = JUMP   CROUCH = DUCK   RIGHT ARM EXTEND = PUNCH   LEFT ARM NEAR CHIN = BLOCK",
             w//2,int(h*.61),WHITE,Fxs,"center")
 
         txt(surf,"STAND UPRIGHT + PRESS C TO CALIBRATE",
@@ -1204,7 +1207,13 @@ while running:
 
     pa=set(kbd)|set(touch)
     if mouse_btn: pa.add(mouse_btn)
-    if pose_tracker and _cam_active: pa|=pose_tracker.get_actions()
+    if pose_tracker and _cam_active:
+        can_punch = (
+            gstate == PLAY
+            and player.state not in (Fighter.HIT, Fighter.KO)
+            and player.punch_timer == 0
+        )
+        pa |= pose_tracker.get_actions(accept_punch=can_punch)
 
     if gstate==PLAY:
         rtimer=max(0,rtimer-1)
@@ -1249,7 +1258,7 @@ while running:
             12,
             H - 28,
             status_color,
-            Fxs
+            Fgesture
         )
 
     ox,oy=shake.off()
